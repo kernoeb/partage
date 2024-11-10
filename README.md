@@ -38,3 +38,9 @@ services:
       - 20000:3001
     command: sh
 ```
+
+### Acknowledgements
+
+- [Axum Websockets example](https://github.com/tokio-rs/axum/blob/main/examples/websockets/src/main.rs)
+- [Rust-Embed example](https://github.com/pyrossh/rust-embed/blob/master/examples/axum-spa/main.rs)
+- [Chatr](https://github.com/0xLaurens/chatr) by 0xLaurens for the backend inspiration
