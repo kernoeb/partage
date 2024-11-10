@@ -1,5 +1,7 @@
 # Partage
 
+![capture partage](resources/partage.png)
+
 ### Prerequisites
 
 - [Bun](https://bun.sh/)
