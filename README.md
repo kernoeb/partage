@@ -34,11 +34,10 @@ For `docker-compose.yml`:
 
 ```yaml
 services:
-  test-partage:
-    image: test-partage
+  partage:
+    image: ghcr.io/kernoeb/partage:main
     ports:
       - 20000:3001
-    command: sh
 ```
 
 ### Acknowledgements

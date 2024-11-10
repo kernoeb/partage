@@ -1,0 +1,7 @@
+services:
+  partage:
+    image: ghcr.io/kernoeb/partage:main
+    restart: always
+    platform: linux/amd64
+    ports:
+      - 20000:3001
