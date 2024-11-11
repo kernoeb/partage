@@ -3,7 +3,7 @@
 </script>
 
 <template>
-  <v-footer height="30" app>
+  <v-footer height="30" app color="transparent">
     <div
       class="text-caption text-disabled"
       style="position: absolute; right: 16px;"

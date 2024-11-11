@@ -8,8 +8,6 @@ RUN bun install --frozen-lockfile
 COPY ./client .
 RUN bun run build
 
-RUN pwd
-
 ##############################
 FROM lukemathwalker/cargo-chef:latest-rust-alpine AS chef
 WORKDIR /app

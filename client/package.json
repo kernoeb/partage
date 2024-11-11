@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "scripts": {
     "dev": "vite",
+    "typecheck": "vue-tsc --noEmit",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "lint": "eslint ."
@@ -20,7 +21,7 @@
     "@types/bun": "*",
     "@types/slug": "5.0.9",
     "@unhead/vue": "1.11.11",
-    "@vitejs/plugin-vue": "5.1.4",
+    "@vitejs/plugin-vue": "5.1.5",
     "@vue/eslint-config-typescript": "14",
     "@vueuse/core": "11.2.0",
     "beasties": "0.1.0",
@@ -34,7 +35,7 @@
     "unplugin-fonts": "1.1.1",
     "unplugin-vue-components": "0.27.4",
     "unplugin-vue-router": "0.10.8",
-    "vite": "5.4.10",
+    "vite": "5.4.11",
     "vite-plugin-vue-layouts": "0.11.0",
     "vite-plugin-vuetify": "2.0.4",
     "vite-ssg": "0.24.1",

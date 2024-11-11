@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import { fileURLToPath, URL } from 'node:url'
 import NotificationsResolver from '@kyvg/vue3-notification/auto-import-resolver'
 import Vue from '@vitejs/plugin-vue'
@@ -11,6 +12,11 @@ import Layouts from 'vite-plugin-vue-layouts'
 import Vuetify, { transformAssetUrls } from 'vite-plugin-vuetify'
 // Utilities
 import { defineConfig } from 'vite'
+
+try {
+  // Make sure dist is created, for the backend
+  fs.mkdirSync('./dist')
+} catch {}
 
 // https://vitejs.dev/config/
 export default defineConfig({

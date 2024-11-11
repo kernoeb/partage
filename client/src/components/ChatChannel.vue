@@ -12,29 +12,10 @@ const { fetch: fetchRooms, rooms } = useRooms()
 const { username } = useUser()
 
 const currentRoom = computed(() => {
-  // console.log('Current room', props.channelId, rooms.value)
   return rooms.value?.find(room => room.id === props.channelId)
 })
 
-watchEffect(() => {
-  if (!props.channelId || !rooms.value) {
-    return
-  }
-
-  console.log('Rooms', rooms.value)
-  // rooms.value = rooms.value.map((room) => {
-  //   const _room = { ...room }
-  //   if (_room.id === props.channelId) {
-  //     if (!_room.users.includes(username)) {
-  //       _room.users.push(username)
-  //     }
-  //     return _room
-  //   }
-  //   return _room
-  // })
-})
-
-const editor = ref<VTextarea | null>(null)
+const editor = useTemplateRef<VTextarea | null>('editor')
 const content = ref<string | null>(null)
 
 const { status, data, send, open } = useWebSocket('/ws', {
@@ -111,10 +92,6 @@ const { status, data, send, open } = useWebSocket('/ws', {
       const channelId = props.channelId
       console.log('Sending username', username, channelId)
       send(JSON.stringify({ channel: channelId, username }))
-
-      // Fetch the rooms
-      // consola.info('[FETCH] Connected')
-      // fetchRooms()
     }
   },
   onError: (err) => {

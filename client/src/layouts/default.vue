@@ -1,5 +1,15 @@
 <script lang="ts" setup>
 import slug from 'slug'
+import { useDisplay, useTheme } from 'vuetify'
+import { VTextField } from 'vuetify/components'
+
+const display = useDisplay()
+const theme = useTheme()
+
+function toggleTheme() {
+  theme.global.name.value = theme.global.current.value.dark ? 'light' : 'dark'
+  localStorage.setItem('theme', theme.global.current.value.dark ? 'dark' : 'light')
+}
 
 const { rooms, fetch, removeRoom } = useRooms()
 const { username } = useUser()
@@ -7,7 +17,15 @@ const { username } = useUser()
 const router = useRouter()
 const route = useRoute()
 
-const drawer = ref<boolean | null>(null)
+const drawer = useLocalStorage('drawer', null, {
+  serializer: {
+    read: (value) => {
+      if (display.mobile.value) return false
+      return value ? (value === 'true') : null
+    },
+    write: value => value != null ? (value ? 'true' : 'false') : '',
+  },
+})
 
 const search = ref('')
 const showSearch = ref(false)
@@ -24,6 +42,7 @@ const filteredRooms = computed(() => {
 
 const dialog = ref(false)
 const roomTitle = ref('')
+const roomTitleTextField = useTemplateRef<VTextField | null>('roomTitleTextField')
 
 async function createRoom(title: string) {
   console.log('create room', title)
@@ -36,6 +55,15 @@ async function createRoom(title: string) {
   dialog.value = false
   roomTitle.value = ''
 }
+
+const usernameInitials = computed(() => {
+  if (!username) return ''
+  return username
+    .split(/[ -]/)
+    .map(name => name.charAt(0))
+    .join('')
+    .toUpperCase()
+})
 </script>
 
 <template>
@@ -52,16 +80,20 @@ async function createRoom(title: string) {
       </template>
     </notifications>
 
-    <v-navigation-drawer v-model="drawer" color="#f5f5f5" floating>
-      <div class="d-flex align-center w-100 pt-2 px-2 mb-3">
+    <v-navigation-drawer
+      v-model="drawer"
+      color="surface"
+      floating
+    >
+      <div class="d-flex align-center w-100 pt-1 px-2 mb-3">
         <v-btn
-          color="grey-darken-2"
+          color="secondary"
           variant="text"
           :icon="showSearch ? '$close' : '$magnify'"
           @click="search = ''; showSearch = !showSearch"
         />
         <template v-if="showSearch">
-          <v-text-field
+          <VTextField
             v-model="search"
             autofocus
             style="width: 100%;"
@@ -75,11 +107,58 @@ async function createRoom(title: string) {
         </template>
         <template v-else>
           <v-spacer />
-          <v-btn color="grey-darken-2" variant="text" icon="$dots-vertical" />
+          <v-dialog
+            v-model="dialog" max-width="290"
+            @after-enter="roomTitleTextField?.focus()"
+          >
+            <template #activator="{ props }">
+              <v-btn
+                color="secondary"
+                variant="text"
+                icon="$forum-plus-outline"
+                v-bind="props"
+              />
+            </template>
+            <v-card>
+              <v-card-title class="text-h6">
+                New channel
+              </v-card-title>
+              <v-card-text class="py-0 px-4">
+                <VTextField
+                  ref="roomTitleTextField"
+                  v-model="roomTitle"
+                  autofocus
+                  placeholder="Room title"
+                  outlined
+                  variant="underlined"
+                  dense
+                  class="mt-n4"
+                  :rules="[v => !!v || 'Title is required', v => (v && v.length >= 2) || 'Title must be at least 2 characters']"
+                  @keydown.enter="createRoom(roomTitle)"
+                />
+              </v-card-text>
+              <v-card-actions>
+                <v-btn @click="dialog = false">
+                  Cancel
+                </v-btn>
+                <v-btn
+                  color="primary"
+                  :disabled="!roomTitle || roomTitle.length < 2"
+                  @click="createRoom(roomTitle)"
+                >
+                  Create
+                </v-btn>
+              </v-card-actions>
+            </v-card>
+          </v-dialog>
         </template>
       </div>
       <v-list-subheader style="min-height: 24px">
-        <span class="text-caption pl-4 text-grey-darken-4">Channels</span>
+        <span
+          class="text-caption pl-4"
+        >
+          Channels
+        </span>
       </v-list-subheader>
       <template v-if="rooms">
         <v-list-item v-for="room in filteredRooms" :key="room.id" link :to="{ name: '/c/[id]', params: { id: room.id } }">
@@ -116,64 +195,68 @@ async function createRoom(title: string) {
           </template>
         </v-list-item>
       </template>
-      <template #append>
-        <div class="pa-2">
-          <v-dialog v-model="dialog" max-width="290">
-            <template #activator="{ props }">
-              <v-btn block variant="tonal" color="primary" v-bind="props">
-                New channel
-              </v-btn>
-            </template>
-            <v-card>
-              <v-card-title class="text-h6">
-                New channel
-              </v-card-title>
-              <v-card-text class="py-0 px-4">
-                <v-text-field
-                  v-model="roomTitle"
-                  autofocus
-                  placeholder="Room title"
-                  outlined
-                  variant="underlined"
-                  dense
-                  class="mt-n4"
-                  clearable
-                  :rules="[v => !!v || 'Title is required', v => (v && v.length >= 2) || 'Title must be at least 2 characters']"
-                  @keydown.enter="createRoom(roomTitle)"
-                />
-              </v-card-text>
-              <v-card-actions>
-                <v-btn variant="text" @click="dialog = false">
-                  Cancel
-                </v-btn>
-                <v-btn
-                  color="primary"
-                  :disabled="!roomTitle || roomTitle.length < 2"
-                  @click="createRoom(roomTitle)"
-                >
-                  Create
-                </v-btn>
-              </v-card-actions>
-            </v-card>
-          </v-dialog>
-        </div>
-      </template>
     </v-navigation-drawer>
 
-    <v-app-bar order="1" color="white" elevation="0">
+    <v-app-bar
+      order="1"
+      height="56"
+      color="background"
+      elevation="0"
+    >
       <template #prepend>
         <v-app-bar-nav-icon
-          color="grey-darken-2"
+          color="secondary"
           @click.stop="drawer = !drawer"
         />
       </template>
-      <div class="d-flex justify-between align-center w-100 pl-2 pr-6">
-        <div class="text-h6 text-grey-darken-2">
+      <div class="d-flex justify-between align-center w-100 pl-2 pr-3">
+        <div class="text-h6 text-secondary">
           Partage
         </div>
         <v-spacer />
-        <v-btn color="grey-darken-2" variant="text" icon="$magnify" />
-        <v-btn color="grey-darken-2" variant="text" icon="$dots-vertical" />
+        <v-menu offset-y width="250">
+          <template #activator="{ props }">
+            <v-btn icon v-bind="props">
+              <v-avatar size="small" color="primary">
+                <span class="text-caption">{{ usernameInitials }}</span>
+              </v-avatar>
+            </v-btn>
+          </template>
+          <v-card
+            variant="outlined"
+            :style="{ borderColor: theme.global.name.value === 'dark' ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.12)' }"
+            elevation="0"
+            rounded="lg"
+          >
+            <v-list elevation="0">
+              <v-list-subheader style="min-height: 24px">
+                <span class="text-caption">Account</span>
+              </v-list-subheader>
+              <v-list-item>
+                <template #prepend>
+                  <v-switch
+                    class="mr-4 custom-switch"
+                    :model-value="theme.global.name.value === 'dark'"
+                    color="primary"
+                    hide-details
+                    density="compact"
+                    @update:model-value="toggleTheme"
+                  >
+                    <template #label>
+                      <div class="v-list-item__content ml-3">
+                        <div class="v-list-item-title">
+                          Dark theme
+                        </div><div class="v-list-item-subtitle">
+                          Toggle dark mode
+                        </div>
+                      </div>
+                    </template>
+                  </v-switch>
+                </template>
+              </v-list-item>
+            </v-list>
+          </v-card>
+        </v-menu>
       </div>
     </v-app-bar>
 
@@ -184,3 +267,9 @@ async function createRoom(title: string) {
     <AppFooter />
   </v-app>
 </template>
+
+<style>
+.custom-switch .v-label {
+  opacity: 1;
+}
+</style>
