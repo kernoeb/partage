@@ -8,6 +8,7 @@ use axum::{
     Json, Router,
 };
 use futures::{SinkExt, StreamExt};
+use optional_default::OptionalDefault;
 use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -16,6 +17,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio::signal;
 use tokio::sync::broadcast;
+use ts_rs::TS;
 
 static INDEX_HTML: &str = "index.html";
 
@@ -96,6 +98,35 @@ fn update_room_content(room: &RoomState, new_content: String) {
     *content = new_content;
 }
 
+#[derive(TS, Serialize, Debug)]
+enum SocketMessageType {
+    #[serde(rename = "join")]
+    Join,
+    #[serde(rename = "leave")]
+    Leave,
+    #[serde(rename = "message")]
+    Message,
+    #[serde(rename = "error")]
+    Error,
+    #[serde(rename = "update-rooms-list")]
+    UpdateRoomsList,
+}
+
+#[derive(TS, Serialize, Debug, OptionalDefault)]
+#[ts(export)]
+struct SocketMessage {
+    #[serde(rename = "type")]
+    message_type: SocketMessageType,
+    #[optional(default = None)]
+    #[ts(type = "string | undefined")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value: Option<String>,
+    #[optional(default = String::new())]
+    #[ts(type = "string | undefined")]
+    #[serde(skip_serializing_if = "String::is_empty")]
+    username: String,
+}
+
 /// Handle sending and receiving messages
 async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     let (mut sender, mut receiver) = socket.split();
@@ -119,10 +150,10 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                     println!("{}", &name);
                     eprintln!("{}", err);
                     let _ = sender
-                        .send(Message::from(
-                            json!({
-                                "type": "error",
-                                "value": "Invalid JSON"
+                        .send(Message::Text(
+                            json!(SocketMessage! {
+                                message_type: SocketMessageType::Error,
+                                value: Some("Invalid JSON".to_string()),
                             })
                             .to_string(),
                         ))
@@ -156,9 +187,8 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                     for (room_name, room_state) in rooms.iter() {
                         if room_name != &channel {
                             let _ = room_state.tx.send(
-                                json!({
-                                    "type": "update-rooms-list",
-                                    "username": "Server"
+                                json!(SocketMessage! {
+                                    message_type: SocketMessageType::UpdateRoomsList,
                                 })
                                 .to_string(),
                             );
@@ -169,10 +199,10 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                 // Send the user the current room content
                 let _ = sender
                     .send(Message::Text(
-                        json!({
-                            "type": "message",
-                            "value": content,
-                            "username": "Server"
+                        json!(SocketMessage {
+                            message_type: SocketMessageType::Message,
+                            value: Some(content),
+                            username: "Server".to_string(),
                         })
                         .to_string(),
                     ))
@@ -180,8 +210,15 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
 
                 break;
             } else {
+                println!("Failed to connect to room! Username already taken");
                 let _ = sender
-                    .send(Message::Text(String::from("Username already taken.")))
+                    .send(Message::Text(
+                        json!(SocketMessage! {
+                            message_type: SocketMessageType::Error,
+                            value: Some("Username already taken".to_string()),
+                        })
+                        .to_string(),
+                    ))
                     .await;
 
                 return;
@@ -201,10 +238,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     let mut rx = tx.subscribe();
 
     let _ = tx.send(
-        json!({
-            "type": "join",
-            "username": username,
-            "value": format!("{} joined the chat!", username)
+        json!(SocketMessage! {
+            message_type: SocketMessageType::Join,
+            username: username.clone(),
         })
         .to_string(),
     );
@@ -232,10 +268,10 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                 update_room_content(rooms.get(&channel).unwrap(), text.clone());
 
                 let _ = tx.send(
-                    json!({
-                        "type": "message",
-                        "username": name,
-                        "value": text
+                    json!(SocketMessage {
+                        message_type: SocketMessageType::Message,
+                        value: Some(text),
+                        username: name.clone(),
                     })
                     .to_string(),
                 );
@@ -249,10 +285,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     };
 
     let _ = tx.send(
-        json!({
-            "type": "leave",
-            "username": username,
-            "value": format!("{} left the chat!", username)
+        json!(SocketMessage! {
+            message_type: SocketMessageType::Leave,
+            username: username.clone(),
         })
         .to_string(),
     );
@@ -307,9 +342,8 @@ async fn remove_room(
     // Notify all users that the room has been removed
     for (_, room_state) in rooms.iter() {
         let _ = room_state.tx.send(
-            json!({
-                "type": "update-rooms-list",
-                "username": "Server"
+            json!(SocketMessage! {
+                message_type: SocketMessageType::UpdateRoomsList,
             })
             .to_string(),
         );
@@ -322,11 +356,11 @@ async fn remove_room(
 }
 
 /// Room
-#[derive(serde::Serialize)]
+#[derive(TS, serde::Serialize)]
+#[ts(export)]
 struct Room {
     id: String,
     users: Vec<String>,
-    content: String,
 }
 
 /// Get a list of all rooms
@@ -337,7 +371,6 @@ async fn get_rooms(State(state): State<Arc<AppState>>) -> Json<Vec<Room>> {
             .map(|(id, room)| Room {
                 id: id.clone(),
                 users: room.users.lock().unwrap().iter().cloned().collect(),
-                content: room.content.lock().unwrap().clone(),
             })
             .collect();
         Json(rooms)

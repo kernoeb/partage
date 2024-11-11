@@ -4,10 +4,13 @@ function randomUsername() {
   return `${adjectives[Math.floor(Math.random() * adjectives.length)]}-${nouns[Math.floor(Math.random() * nouns.length)]}-${Math.floor(Math.random() * 100)}`
 }
 
-const username = randomUsername()
+const savedUsername = localStorage.getItem('username')
+const username = savedUsername || randomUsername()
+if (!savedUsername) {
+  console.log(`Generated random username: ${username}`)
+  localStorage.setItem('username', username)
+}
 
-export function useUser() {
-  return {
-    username,
-  }
+export {
+  username,
 }

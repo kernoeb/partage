@@ -1,9 +1,5 @@
+import type { Room } from '@/bindings/Room'
 import { notify } from '@kyvg/vue3-notification'
-
-interface Room {
-  id: string
-  users: string[]
-}
 
 const { isFetching, error, data: rooms, execute: fetch } = useFetch('/rooms', { immediate: false })
   .json<Room[]>()

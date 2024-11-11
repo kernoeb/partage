@@ -5,12 +5,14 @@
  */
 
 // Styles
-import { mdiClose, mdiDotsVertical, mdiForumPlusOutline, mdiMagnify, mdiPencil, mdiThemeLightDark, mdiTrashCan } from '@mdi/js'
+import { mdiClose, mdiDotsVertical, mdiForumPlusOutline, mdiMagnify, mdiPencil, mdiRefresh, mdiThemeLightDark, mdiTrashCan } from '@mdi/js'
 import { aliases, mdi } from 'vuetify/iconsets/mdi-svg'
 import 'vuetify/styles'
-
 // Composables
 import { createVuetify, type ThemeDefinition } from 'vuetify'
+
+// Utils
+import { getSavedTheme } from '@/utils/theme'
 
 const lightTheme: ThemeDefinition = {
   dark: false,
@@ -42,14 +44,6 @@ const darkTheme: ThemeDefinition = {
   },
 }
 
-const defaultTheme = 'light'
-const whitelistedThemes = ['light', 'dark']
-
-function getSavedTheme() {
-  const savedTheme = window.localStorage.getItem('theme') || defaultTheme
-  return whitelistedThemes.includes(savedTheme) ? savedTheme : defaultTheme
-}
-
 // https://vuetifyjs.com/en/introduction/why-vuetify/#feature-guides
 export default createVuetify({
   icons: {
@@ -66,6 +60,7 @@ export default createVuetify({
       'trash-can': mdiTrashCan,
       'forum-plus-outline': mdiForumPlusOutline,
       'theme-light-dark': mdiThemeLightDark,
+      'refresh': mdiRefresh,
     },
   },
   theme: {

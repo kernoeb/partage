@@ -1,18 +1,38 @@
 <script lang="ts" setup>
+import { isBrowserDark } from '@/utils/theme'
+import { username } from '@/utils/user'
 import slug from 'slug'
 import { useDisplay, useTheme } from 'vuetify'
 import { VTextField } from 'vuetify/components'
 
 const display = useDisplay()
-const theme = useTheme()
 
-function toggleTheme() {
-  theme.global.name.value = theme.global.current.value.dark ? 'light' : 'dark'
-  localStorage.setItem('theme', theme.global.current.value.dark ? 'dark' : 'light')
+const theme = useTheme()
+const myTheme = useLocalStorage('theme', 'system') as Ref<'system' | 'light' | 'dark'>
+
+watch(myTheme, (value: 'system' | 'light' | 'dark') => {
+  if (value === 'system') {
+    theme.global.name.value = isBrowserDark() ? 'dark' : 'light'
+  } else {
+    theme.global.name.value = value
+  }
+})
+
+onMounted(() => {
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (event) => {
+    console.log('theme change', event)
+    if (myTheme.value === 'system') {
+      theme.global.name.value = event.matches ? 'dark' : 'light'
+    }
+  })
+})
+
+function newSession() {
+  localStorage.removeItem('username')
+  location.reload()
 }
 
 const { rooms, fetch, removeRoom } = useRooms()
-const { username } = useUser()
 
 const router = useRouter()
 const route = useRoute()
@@ -214,7 +234,7 @@ const usernameInitials = computed(() => {
           Partage
         </div>
         <v-spacer />
-        <v-menu offset-y width="250">
+        <v-menu :close-on-content-click="false" offset-y width="250">
           <template #activator="{ props }">
             <v-btn icon v-bind="props">
               <v-avatar size="small" color="primary">
@@ -230,28 +250,25 @@ const usernameInitials = computed(() => {
           >
             <v-list elevation="0">
               <v-list-subheader style="min-height: 24px">
-                <span class="text-caption">Account</span>
+                <span class="text-caption">Welcome, {{ username }}</span>
               </v-list-subheader>
               <v-list-item>
+                <v-radio-group
+                  v-model="myTheme"
+                  class="custom-radio-group"
+                  hide-details
+                  density="comfortable"
+                  label="Theme"
+                >
+                  <v-radio label="Light" value="light" />
+                  <v-radio label="Dark" value="dark" />
+                  <v-radio label="System" value="system" />
+                </v-radio-group>
+              </v-list-item>
+              <v-divider class="my-2" />
+              <v-list-item class="mb-1" title="New session" subtitle="Change username" @click="newSession()">
                 <template #prepend>
-                  <v-switch
-                    class="mr-4 custom-switch"
-                    :model-value="theme.global.name.value === 'dark'"
-                    color="primary"
-                    hide-details
-                    density="compact"
-                    @update:model-value="toggleTheme"
-                  >
-                    <template #label>
-                      <div class="v-list-item__content ml-3">
-                        <div class="v-list-item-title">
-                          Dark theme
-                        </div><div class="v-list-item-subtitle">
-                          Toggle dark mode
-                        </div>
-                      </div>
-                    </template>
-                  </v-switch>
+                  <v-icon icon="$refresh" />
                 </template>
               </v-list-item>
             </v-list>
@@ -271,5 +288,10 @@ const usernameInitials = computed(() => {
 <style>
 .custom-switch .v-label {
   opacity: 1;
+}
+
+.custom-radio-group .v-label, .custom-radio-group .v-selection-control-group {
+  margin-inline-start: 0!important;
+  padding-inline-start: 0!important;
 }
 </style>

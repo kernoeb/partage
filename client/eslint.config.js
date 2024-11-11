@@ -2,6 +2,7 @@ import antfu from '@antfu/eslint-config'
 
 export default antfu({
   vue: true,
+  ignores: ['src/bindings/*'],
   rules: {
     'no-console': 'off',
     'antfu/if-newline': 'off',

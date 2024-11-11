@@ -1,5 +1,8 @@
 <script setup lang="ts">
+import type { SocketMessage } from '@/bindings/SocketMessage'
 import type { VTextarea } from 'vuetify/components'
+import { username } from '@/utils/user'
+import { notify } from '@kyvg/vue3-notification'
 
 const props = defineProps({
   channelId: {
@@ -9,7 +12,6 @@ const props = defineProps({
 })
 
 const { fetch: fetchRooms, rooms } = useRooms()
-const { username } = useUser()
 
 const currentRoom = computed(() => {
   return rooms.value?.find(room => room.id === props.channelId)
@@ -29,10 +31,15 @@ const { status, data, send, open } = useWebSocket('/ws', {
       }
 
       try {
-        const { type, username: msgUsername, value } = JSON.parse(msg)
+        const { type, username: msgUsername, value } = JSON.parse(msg) as SocketMessage
         if (type === 'error') {
           console.error('Error', value)
+          notify({ type: 'error', title: 'Error', text: value })
         } else if (type === 'join') {
+          if (!msgUsername) {
+            console.error('Invalid join message', msg)
+            return
+          }
           console.log(`User ${msgUsername} joined`)
           if (msgUsername !== username) {
             consola.info('[FETCH] Join', msgUsername, username)
@@ -66,6 +73,10 @@ const { status, data, send, open } = useWebSocket('/ws', {
             }
           }
         } else if (type === 'leave') {
+          if (!msgUsername) {
+            console.error('Invalid leave message', msg)
+            return
+          }
           console.log(`User ${msgUsername} left`)
           consola.info('[FETCH] Leave')
           fetchRooms()
@@ -73,7 +84,11 @@ const { status, data, send, open } = useWebSocket('/ws', {
           console.log('Rooms updated')
           consola.info('[FETCH] Update rooms')
           fetchRooms()
-        } else {
+        } else if (value != null) {
+          if (!msgUsername) {
+            console.error('Invalid message', msg)
+            return
+          }
           console.log(`User ${msgUsername} sent: ${value}`, content.value)
           if (content.value !== value) {
             content.value = value
@@ -95,7 +110,7 @@ const { status, data, send, open } = useWebSocket('/ws', {
     }
   },
   onError: (err) => {
-    console.error('Error', err)
+    consola.error('Error', err)
   },
 })
 
@@ -108,8 +123,13 @@ whenever(canWrite, () => {
   }, false)
 })
 
-watch(() => props.channelId, (cId) => {
-  console.log('Channel ID changed', cId)
+const channelId = computed(() => props.channelId)
+watch(channelId, (cId, oldCId) => {
+  if (!cId) {
+    console.warn('No channel ID')
+    return
+  }
+  console.log('Channel ID changed', oldCId, '->', cId)
   content.value = null // Reset the content
   open() // Reconnect
 }, { immediate: true })
