@@ -12,8 +12,16 @@
 
 #### Backend
 
+- Start the backend server
+
 ```bash
 bacon
+```
+
+- Generate types (bindings) for the frontend
+
+```bash
+cargo test
 ```
 
 #### Frontend
@@ -22,6 +30,8 @@ bacon
 cd client
 bun run dev
 ```
+
+Open [http://localhost:13124](http://localhost:13124) in your browser.
 
 ### Docker
 

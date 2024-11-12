@@ -4,6 +4,15 @@ function randomUsername() {
   return `${adjectives[Math.floor(Math.random() * adjectives.length)]}-${nouns[Math.floor(Math.random() * nouns.length)]}-${Math.floor(Math.random() * 100)}`
 }
 
+function usernameInitials(username: string) {
+  if (!username) return ''
+  return username
+    .split(/[ -]/)
+    .map(name => name.charAt(0))
+    .join('')
+    .toUpperCase()
+}
+
 const savedUsername = localStorage.getItem('username')
 const username = savedUsername || randomUsername()
 if (!savedUsername) {
@@ -13,4 +22,5 @@ if (!savedUsername) {
 
 export {
   username,
+  usernameInitials,
 }

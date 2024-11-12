@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { SocketMessage } from '@/bindings/SocketMessage'
 import type { VTextarea } from 'vuetify/components'
-import { username } from '@/utils/user'
+import { username, usernameInitials } from '@/utils/user'
 import { notify } from '@kyvg/vue3-notification'
+import { useTheme } from 'vuetify'
 
 const props = defineProps({
   channelId: {
@@ -11,10 +12,24 @@ const props = defineProps({
   },
 })
 
+const theme = useTheme()
+
 const { fetch: fetchRooms, rooms } = useRooms()
 
 const currentRoom = computed(() => {
   return rooms.value?.find(room => room.id === props.channelId)
+})
+
+const currentRoomUsersWithMeFirst = computed(() => {
+  const room = currentRoom.value
+  if (!room || !room.users || !room.users.length) return
+
+  const users = room.users
+  const meIndex = users.indexOf(username)
+  if (meIndex === -1) {
+    return users
+  }
+  return [username, ...users.slice(0, meIndex), ...users.slice(meIndex + 1)]
 })
 
 const editor = useTemplateRef<VTextarea | null>('editor')
@@ -157,12 +172,30 @@ watch(channelId, (cId, oldCId) => {
       />
     </div>
 
-    <div v-if="currentRoom?.users?.length">
-      <v-chip-group :model-value="[username]">
-        <v-chip v-for="user in currentRoom.users" :key="user" color="primary" label :value="user">
-          {{ user }}
-        </v-chip>
-      </v-chip-group>
+    <div v-if="currentRoomUsersWithMeFirst">
+      <v-avatar
+        v-for="user in currentRoomUsersWithMeFirst"
+        :key="user" rounded="lg"
+        size="28"
+        class="mr-2"
+        :style="{
+          outline: user === username
+            ? (theme.global.name.value === 'dark' ? '1px solid grey' : 'none')
+            : 'none',
+          opacity: user === username ? 1 : 0.7,
+        }"
+        :color="user === username
+          ? 'black'
+          : (theme.global.name.value === 'dark' ? 'grey-darken-3' : 'grey-lighten-3')
+        "
+      >
+        <v-tooltip location="top">
+          <template #activator="{ props: propsTooltip }">
+            <span v-bind="propsTooltip" class="text-caption">{{ usernameInitials(user) }}</span>
+          </template>
+          <span>{{ user }}</span>
+        </v-tooltip>
+      </v-avatar>
     </div>
     <div v-else style="height: 48px">
       ...

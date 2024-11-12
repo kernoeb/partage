@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { isBrowserDark } from '@/utils/theme'
-import { username } from '@/utils/user'
+import { username, usernameInitials } from '@/utils/user'
 import slug from 'slug'
 import { useDisplay, useTheme } from 'vuetify'
 import { VTextField } from 'vuetify/components'
@@ -75,15 +75,6 @@ async function createRoom(title: string) {
   dialog.value = false
   roomTitle.value = ''
 }
-
-const usernameInitials = computed(() => {
-  if (!username) return ''
-  return username
-    .split(/[ -]/)
-    .map(name => name.charAt(0))
-    .join('')
-    .toUpperCase()
-})
 </script>
 
 <template>
@@ -231,14 +222,17 @@ const usernameInitials = computed(() => {
       </template>
       <div class="d-flex justify-between align-center w-100 pl-2 pr-3">
         <div class="text-h6 text-secondary">
+          <v-avatar size="25" class="mr-2" rounded="0">
+            <v-img alt="Partage" src="/partage-black-round.webp" />
+          </v-avatar>
           Partage
         </div>
         <v-spacer />
         <v-menu :close-on-content-click="false" offset-y width="250">
           <template #activator="{ props }">
             <v-btn icon v-bind="props">
-              <v-avatar size="small" color="primary">
-                <span class="text-caption">{{ usernameInitials }}</span>
+              <v-avatar rounded="lg" size="small" color="black">
+                <span class="text-caption">{{ usernameInitials(username) }}</span>
               </v-avatar>
             </v-btn>
           </template>

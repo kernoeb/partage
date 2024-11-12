@@ -63,6 +63,11 @@ export default createVuetify({
       'refresh': mdiRefresh,
     },
   },
+  defaults: {
+    VBtn: {
+      rounded: 'lg',
+    },
+  },
   theme: {
     defaultTheme: getSavedTheme(),
     themes: {
