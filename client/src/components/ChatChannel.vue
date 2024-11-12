@@ -197,7 +197,7 @@ watch(channelId, (cId, oldCId) => {
         </v-tooltip>
       </v-avatar>
     </div>
-    <div v-else style="height: 48px">
+    <div v-else style="height: 28px">
       ...
     </div>
   </v-container>

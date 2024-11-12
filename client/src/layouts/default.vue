@@ -145,7 +145,7 @@ async function createRoom(title: string) {
                   dense
                   class="mt-n4"
                   :rules="[v => !!v || 'Title is required', v => (v && v.length >= 2) || 'Title must be at least 2 characters']"
-                  @keydown.enter="createRoom(roomTitle)"
+                  @keydown.enter="roomTitleTextField?.isValid && createRoom(roomTitle)"
                 />
               </v-card-text>
               <v-card-actions>
@@ -188,17 +188,18 @@ async function createRoom(title: string) {
                 <v-list-item disabled density="compact">
                   <v-list-item-title>
                     <v-icon>$pencil</v-icon>
-                    <span class="ml-2">Renommer</span>
+                    <span class="ml-2">Rename</span>
                   </v-list-item-title>
                 </v-list-item>
                 <v-list-item
                   v-if="room.users.length === 1 && room.users.includes(username)"
+                  :disabled="rooms.length === 1"
                   density="compact"
                   @click="removeRoom(room.id)"
                 >
                   <v-list-item-title>
                     <v-icon>$trash-can</v-icon>
-                    <span class="ml-2">Supprimer</span>
+                    <span class="ml-2">Remove</span>
                   </v-list-item-title>
                 </v-list-item>
               </v-list>
