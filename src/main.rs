@@ -170,14 +170,17 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
 
                 tx = Some(room.tx.clone());
 
+                // Add the user to the room, if they are not already in it
                 if !room.users.lock().unwrap().contains(&connect.username) {
                     room.users
                         .lock()
                         .unwrap()
                         .insert(connect.username.to_owned());
-                    username = connect.username.clone();
                 }
 
+                // A user can join the room multiple times, so we need to update the username
+                // Anyone can take the username of another user, but we don't care
+                username = connect.username.clone();
                 content = room.content.lock().unwrap().clone();
             }
 
@@ -210,12 +213,12 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
 
                 break;
             } else {
-                println!("Failed to connect to room! Username already taken");
+                println!("Failed to connect to room!");
                 let _ = sender
                     .send(Message::Text(
                         json!(SocketMessage! {
                             message_type: SocketMessageType::Error,
-                            value: Some("Username already taken".to_string()),
+                            value: Some("Failed to connect to room!".to_string()),
                         })
                         .to_string(),
                     ))
