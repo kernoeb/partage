@@ -4,7 +4,7 @@ import { notify } from '@kyvg/vue3-notification'
 const { isFetching, error, data: rooms, execute: fetch } = useFetch('/rooms', { immediate: false })
   .json<Room[]>()
 
-const defaultRoom = 'channel-1'
+const defaultRoom = 'general'
 
 consola.info('[FETCH] Use rooms')
 fetch().catch(console.error)

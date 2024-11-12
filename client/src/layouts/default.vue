@@ -179,7 +179,10 @@ async function createRoom(title: string) {
           <v-list-item-subtitle>
             {{ room.users.length }} {{ room.users.length > 1 ? 'members' : 'member' }}
           </v-list-item-subtitle>
-          <template v-if="'id' in route.params && room.id === route.params.id" #append>
+          <template
+            v-if="'id' in route.params && room.id === route.params.id && room.id !== 'general'"
+            #append
+          >
             <v-menu offset-y>
               <template #activator="{ props }">
                 <v-btn v-bind="props" icon="$dots-vertical" variant="text" size="small" @click.prevent />

@@ -12,6 +12,13 @@
 
 #### Backend
 
+- Sqlx setup
+
+```bash
+sqlx database create
+sqlx migrate run
+```
+
 - Start the backend server
 
 ```bash

@@ -1,3 +1,4 @@
+use anyhow::Result;
 use axum::extract::State;
 use axum::http::{header, StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
@@ -7,16 +8,20 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use dotenvy::dotenv;
 use futures::{SinkExt, StreamExt};
 use optional_default::OptionalDefault;
 use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sqlx::migrate::MigrateDatabase;
+use sqlx::sqlite::{Sqlite, SqlitePool};
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::signal;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch, Mutex};
+use tokio::time::{self, Duration};
 use ts_rs::TS;
 
 static INDEX_HTML: &str = "index.html";
@@ -25,44 +30,123 @@ static INDEX_HTML: &str = "index.html";
 #[folder = "client/dist/"]
 struct Assets;
 
-/// State of the app
-struct AppState {
-    rooms: Mutex<HashMap<String, RoomState>>,
+#[derive(sqlx::FromRow, Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct PartialRoomState {
+    room_id: String,
+    content: Option<String>,
 }
 
 /// RoomState
+#[derive(Debug)]
 struct RoomState {
     users: Mutex<HashSet<String>>,
     tx: broadcast::Sender<String>,
-    content: Mutex<String>,
+    content_tx: watch::Sender<String>,
+    content_rx: watch::Receiver<String>,
 }
 
 impl RoomState {
     fn new() -> Self {
+        let (content_tx, content_rx) = watch::channel(String::new());
         Self {
             users: Mutex::new(HashSet::new()),
-            tx: broadcast::channel(69).0,
-            content: Mutex::new(String::new()),
+            tx: broadcast::channel(100).0,
+            content_tx,
+            content_rx,
         }
     }
 }
 
+/// State of the app
+struct AppState {
+    rooms: Mutex<HashMap<String, RoomState>>,
+    db: SqlitePool,
+}
+
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
+    if dotenv().is_err() {
+        eprintln!("No .env file found");
+    }
+
     let port = std::env::var("PORT")
         .map(|val| val.parse::<u16>())
-        .unwrap_or(Ok(3001))
-        .unwrap();
+        .unwrap_or(Ok(3001))?; // Default port is 3001
+
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
-    let app_state = Arc::new(AppState {
-        rooms: Mutex::new(HashMap::new()),
-    });
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite::memory:".into());
+    println!("Database URL: {}", db_url);
+
+    let db_url = db_url.as_str();
+
+    if !Sqlite::database_exists(db_url).await.unwrap_or(false) {
+        println!("Creating database {}", db_url);
+        match Sqlite::create_database(db_url).await {
+            Ok(_) => println!("Create db success"),
+            Err(error) => panic!("error: {}", error),
+        }
+    } else {
+        println!("Database already exists");
+    }
+
+    let db = SqlitePool::connect(db_url).await?;
+
+    // Migrate the database
+    let migration_results = sqlx::migrate!().run(&db).await;
+    match migration_results {
+        Ok(_) => println!("Migration success"),
+        Err(error) => {
+            panic!("error: {}", error);
+        }
+    }
+    println!("migration: {:?}", migration_results);
+
+    // Restore rooms from the database
+    let mut rooms = HashMap::new();
 
     {
-        // Add a room
-        let mut rooms = app_state.rooms.lock().unwrap();
-        rooms.insert("channel-1".to_owned(), RoomState::new());
+        for room in sqlx::query!("SELECT * FROM rooms").fetch_all(&db).await? {
+            println!(
+                "Restoring room: {} with content: {}",
+                room.room_id, room.content
+            );
+            let room_state = RoomState::new();
+            room_state.content_tx.send(room.content.clone())?;
+            rooms.insert(room.room_id, room_state);
+        }
+
+        // If no "general" room is found, create one
+        let default_room = "general";
+        if !rooms.contains_key(default_room) {
+            rooms.insert(default_room.to_string(), RoomState::new());
+        }
+    }
+
+    let app_state = Arc::new(AppState {
+        rooms: Mutex::new(rooms),
+        db,
+    });
+
+    for (room_id, room_state) in app_state.rooms.lock().await.iter() {
+        let db = app_state.db.clone();
+        let content_rx = room_state.content_rx.clone();
+        let room_id = room_id.clone();
+        tokio::spawn(async move {
+            let mut interval = time::interval(Duration::from_secs(2));
+            let mut last_content = content_rx.borrow().clone();
+            loop {
+                interval.tick().await;
+                if *content_rx.borrow() != last_content {
+                    last_content = content_rx.borrow().clone();
+                    if let Err(e) =
+                        update_room_content(&db, room_id.clone(), last_content.clone()).await
+                    {
+                        eprintln!("Failed to update room content in database: {}", e);
+                    }
+                }
+            }
+        });
     }
 
     let app = Router::new()
@@ -72,19 +156,18 @@ async fn main() {
         .with_state(app_state)
         .fallback(static_handler);
 
-    let listener = tokio::net::TcpListener::bind(addr.to_string())
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind(addr.to_string()).await?;
 
-    println!("listening on {}", listener.local_addr().unwrap());
+    println!("listening on {}", listener.local_addr()?);
 
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(shutdown_signal())
-    .await
-    .unwrap();
+    .await?;
+
+    Ok(())
 }
 
 /// Handler
@@ -93,9 +176,23 @@ async fn handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> im
 }
 
 /// Update the room content
-fn update_room_content(room: &RoomState, new_content: String) {
-    let mut content = room.content.lock().unwrap();
-    *content = new_content;
+async fn update_room_content(
+    db: &SqlitePool,
+    room_id: String,
+    new_content: String,
+) -> anyhow::Result<()> {
+    println!("Updating room content : {}", new_content);
+    sqlx::query!(
+        r#"
+        INSERT OR REPLACE INTO rooms (room_id, content) VALUES (?, ?)
+        "#,
+        room_id,
+        new_content
+    )
+    .execute(db)
+    .await?;
+
+    Ok(())
 }
 
 #[derive(TS, Serialize, Debug)]
@@ -163,30 +260,29 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
             };
 
             {
-                let mut rooms = state.rooms.lock().unwrap();
+                let mut rooms = state.rooms.lock().await;
                 channel = connect.channel.clone();
 
-                let room = rooms.entry(connect.channel).or_insert_with(RoomState::new);
+                let room = rooms
+                    .entry(connect.channel.clone())
+                    .or_insert_with(RoomState::new);
 
                 tx = Some(room.tx.clone());
 
                 // Add the user to the room, if they are not already in it
-                if !room.users.lock().unwrap().contains(&connect.username) {
-                    room.users
-                        .lock()
-                        .unwrap()
-                        .insert(connect.username.to_owned());
+                if !room.users.lock().await.contains(&connect.username) {
+                    room.users.lock().await.insert(connect.username.to_owned());
                 }
 
                 // A user can join the room multiple times, so we need to update the username
                 // Anyone can take the username of another user, but we don't care
                 username = connect.username.clone();
-                content = room.content.lock().unwrap().clone();
+                content = room.content_rx.borrow().clone();
             }
 
             if tx.is_some() && !username.is_empty() {
                 {
-                    let rooms = state.rooms.lock().unwrap();
+                    let rooms = state.rooms.lock().await;
                     for (room_name, room_state) in rooms.iter() {
                         if room_name != &channel {
                             let _ = room_state.tx.send(
@@ -267,8 +363,13 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                 println!("{}: {}", name, text);
 
                 // Update the room content
-                let rooms = state.rooms.lock().unwrap();
-                update_room_content(rooms.get(&channel).unwrap(), text.clone());
+                let rooms = state.rooms.lock().await;
+                if let Some(room) = rooms.get(&channel) {
+                    // ignore errors but log them
+                    room.content_tx
+                        .send(text.clone())
+                        .unwrap_or_else(|err| eprintln!("Failed to send message to room: {}", err));
+                }
 
                 let _ = tx.send(
                     json!(SocketMessage {
@@ -295,11 +396,11 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         .to_string(),
     );
 
-    let mut rooms = state.rooms.lock().unwrap();
+    let mut rooms = state.rooms.lock().await;
     let room = rooms.get_mut(&channel);
 
     if let Some(room) = room {
-        room.users.lock().unwrap().remove(&username);
+        room.users.lock().await.remove(&username);
     } else {
         eprintln!("Failed to remove user from room!");
     }
@@ -324,7 +425,20 @@ async fn remove_room(
     State(state): State<Arc<AppState>>,
     room: axum::extract::Path<String>,
 ) -> Result<Json<serde_json::Value>, CustomError> {
-    let mut rooms = state.rooms.lock().unwrap();
+    // If general, forbid removal
+    if room.0 == "general" {
+        return Err(CustomError {
+            message: "Cannot remove the default room.".to_owned(),
+        });
+    }
+
+    let mut rooms = state.rooms.lock().await;
+
+    // If already removed, fail silently
+    if !rooms.contains_key(&room.0) {
+        println!("Room already removed.");
+        return Ok(Json(json!({ "message": "Room already removed." })));
+    }
 
     // If only 1 room exists, don't remove it, return an error
     if rooms.len() == 1 {
@@ -334,13 +448,24 @@ async fn remove_room(
     }
 
     // If the room has more than 1 user, don't remove it, return an error
-    if rooms.get(&room.0).unwrap().users.lock().unwrap().len() > 1 {
+    if rooms.get(&room.0).unwrap().users.lock().await.len() > 1 {
         return Err(CustomError {
             message: "Room has more than 1 user.".to_owned(),
         });
     }
 
     rooms.remove(&room.0);
+
+    // Update database
+    if let Err(e) = sqlx::query!("DELETE FROM rooms WHERE room_id = $1", room.0)
+        .execute(&state.db)
+        .await
+    {
+        eprintln!("Failed to remove room from database: {:?}", e);
+        return Err(CustomError {
+            message: "Failed to remove room from database.".to_owned(),
+        });
+    }
 
     // Notify all users that the room has been removed
     for (_, room_state) in rooms.iter() {
@@ -368,18 +493,18 @@ struct Room {
 
 /// Get a list of all rooms
 async fn get_rooms(State(state): State<Arc<AppState>>) -> Json<Vec<Room>> {
-    if let Ok(rooms) = state.rooms.lock() {
-        let rooms = rooms
-            .iter()
-            .map(|(id, room)| Room {
-                id: id.clone(),
-                users: room.users.lock().unwrap().iter().cloned().collect(),
-            })
-            .collect();
-        Json(rooms)
-    } else {
-        Json(vec![])
+    let rooms = state.rooms.lock().await;
+    let mut room_list = Vec::new();
+
+    for (id, room) in rooms.iter() {
+        let users = room.users.lock().await;
+        room_list.push(Room {
+            id: id.clone(),
+            users: users.iter().cloned().collect(),
+        });
     }
+
+    Json(room_list)
 }
 
 /// Static file handler

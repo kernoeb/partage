@@ -2,6 +2,9 @@ services:
   partage:
     image: ghcr.io/kernoeb/partage:main
     restart: always
-    platform: linux/amd64
+    environment:
+      - DATABASE_URL=sqlite:///app/db/db.sqlite3
+    volumes:
+      - ./db:/app/db
     ports:
       - 20000:3001

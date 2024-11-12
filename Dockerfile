@@ -10,6 +10,9 @@ RUN bun run build
 
 ##############################
 FROM lukemathwalker/cargo-chef:latest-rust-alpine AS chef
+RUN apk add --no-cache openssl-dev openssl openssl-libs-static
+RUN cargo install sqlx-cli --no-default-features --features sqlite
+
 WORKDIR /app
 
 ##############################
@@ -24,7 +27,12 @@ COPY --from=planner /app/recipe.json .
 RUN cargo chef cook --release
 COPY ./Cargo.toml ./Cargo.lock ./
 COPY ./src ./src
+COPY ./migrations ./migrations
 COPY --from=build /build/dist ./client/dist
+
+ENV DATABASE_URL=sqlite:/tmp/ci.db
+RUN sqlx database create
+RUN sqlx migrate run
 RUN cargo build --release
 
 ##############################
