@@ -21,7 +21,7 @@
     "@types/bun": "*",
     "@types/slug": "5.0.9",
     "@unhead/vue": "1.11.11",
-    "@vitejs/plugin-vue": "5.1.5",
+    "@vitejs/plugin-vue": "5.2.0",
     "@vue/eslint-config-typescript": "14",
     "@vueuse/core": "11.2.0",
     "beasties": "0.1.0",
