@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import { isBrowserDark } from '@/utils/theme'
 import { username, usernameInitials } from '@/utils/user'
+import NumberFlow from '@number-flow/vue'
 import slug from 'slug'
 import { useDisplay, useTheme } from 'vuetify'
 import { VTextField } from 'vuetify/components'
@@ -177,7 +178,7 @@ async function createRoom(title: string) {
             #{{ room.id }}
           </v-list-item-title>
           <v-list-item-subtitle>
-            {{ room.users.length }} {{ room.users.length > 1 ? 'members' : 'member' }}
+            <NumberFlow :value="room.users.length" /> {{ room.users.length > 1 ? 'members' : 'member' }}
           </v-list-item-subtitle>
           <template
             v-if="'id' in route.params && room.id === route.params.id && room.id !== 'general'"

@@ -18,6 +18,7 @@
     "@antfu/eslint-config": "3.8.0",
     "@kyvg/vue3-notification": "3.4.1",
     "@mdi/js": "7.4.47",
+    "@number-flow/vue": "0.2.2",
     "@types/bun": "*",
     "@types/slug": "5.0.9",
     "@unhead/vue": "1.11.11",
