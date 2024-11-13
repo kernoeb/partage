@@ -65,6 +65,7 @@ services:
 
 ### TODO
 
-- Tests
-- Documentation
-- Persistence for new channels
+- [ ] Tests
+- [ ] Documentation
+- [x] Persistence for new channels
+- [ ] Feature : no database

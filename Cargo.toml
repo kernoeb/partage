@@ -1,5 +1,10 @@
 [package]
 name = "partage"
+description = "A simple file sharing service"
+license = "MIT"
+repository = "https://github.com/kernoeb/partage/"
+keywords = ["file", "sharing", "service"]
+categories = ["networking", "web-programming"]
 version = "0.1.0"
 edition = "2021"
 
