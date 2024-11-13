@@ -93,7 +93,7 @@ struct AppState {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
     if dotenv().is_err() {
         eprintln!("No .env file found");
     }
@@ -397,9 +397,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     };
 
     tokio::select! {
-        _ = (&mut send_messages) => recv_messages.abort(),
-        _ = (&mut recv_messages) => send_messages.abort(),
-    };
+        _ = &mut send_messages => recv_messages.abort(),
+        _ = &mut recv_messages => send_messages.abort(),
+    }
 
     let _ = tx.send(
         json!(SocketMessage! {
