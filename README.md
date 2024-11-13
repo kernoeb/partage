@@ -68,4 +68,4 @@ services:
 - [ ] Tests
 - [ ] Documentation
 - [x] Persistence for new channels
-- [ ] Feature : no database
+- [x] Feature : no database

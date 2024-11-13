@@ -53,27 +53,29 @@ struct RoomState {
 }
 
 impl RoomState {
-    fn new(room_id: String, db: &SqlitePool) -> Self {
+    fn new(room_id: String, db: &Option<SqlitePool>) -> Self {
         let (content_tx, content_rx) = watch::channel(String::new());
-        let db = db.clone();
-
         let content_rx_clone = content_rx.clone();
 
-        tokio::spawn(async move {
-            let mut interval = time::interval(Duration::from_secs(2));
-            let mut last_content = content_rx.borrow().clone();
-            loop {
-                interval.tick().await;
-                if *content_rx.borrow() != last_content {
-                    last_content.clone_from(&content_rx.borrow());
-                    if let Err(e) =
-                        update_room_content(&db, room_id.clone(), last_content.clone()).await
-                    {
-                        eprintln!("Failed to update room content in database: {e}");
+        if let Some(db) = db {
+            let db = db.clone();
+
+            tokio::spawn(async move {
+                let mut interval = time::interval(Duration::from_secs(2));
+                let mut last_content = content_rx.borrow().clone();
+                loop {
+                    interval.tick().await;
+                    if *content_rx.borrow() != last_content {
+                        last_content.clone_from(&content_rx.borrow());
+                        if let Err(e) =
+                            update_room_content(&db, room_id.clone(), last_content.clone()).await
+                        {
+                            eprintln!("Failed to update room content in database: {e}");
+                        }
                     }
                 }
-            }
-        });
+            });
+        }
 
         Self {
             users: Mutex::new(HashSet::new()),
@@ -87,7 +89,7 @@ impl RoomState {
 /// State of the app
 struct AppState {
     rooms: Mutex<HashMap<String, RoomState>>,
-    db: SqlitePool,
+    db: Option<SqlitePool>,
 }
 
 #[tokio::main]
@@ -102,45 +104,53 @@ async fn main() -> anyhow::Result<()> {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite::memory:".into());
-    println!("Database URL: {db_url}");
+    let db = if let Ok(db_url) = std::env::var("DATABASE_URL") {
+        println!("Database URL: {db_url}");
 
-    let db_url = db_url.as_str();
+        let db_url = db_url.as_str();
 
-    if Sqlite::database_exists(db_url).await.unwrap_or(false) {
-        println!("Database already exists");
+        if Sqlite::database_exists(db_url).await.unwrap_or(false) {
+            println!("Database already exists");
+        } else {
+            println!("Creating database {db_url}");
+            match Sqlite::create_database(db_url).await {
+                Ok(()) => println!("Create db success"),
+                Err(error) => panic!("error: {error}"),
+            }
+        }
+
+        let db = SqlitePool::connect(db_url).await?;
+
+        // Migrate the database
+        let migration_results = sqlx::migrate!().run(&db).await;
+        match migration_results {
+            Ok(()) => println!("Migration success"),
+            Err(error) => {
+                panic!("error: {error}");
+            }
+        }
+        println!("migration: {migration_results:?}");
+
+        Some(db)
     } else {
-        println!("Creating database {db_url}");
-        match Sqlite::create_database(db_url).await {
-            Ok(()) => println!("Create db success"),
-            Err(error) => panic!("error: {error}"),
-        }
-    }
-
-    let db = SqlitePool::connect(db_url).await?;
-
-    // Migrate the database
-    let migration_results = sqlx::migrate!().run(&db).await;
-    match migration_results {
-        Ok(()) => println!("Migration success"),
-        Err(error) => {
-            panic!("error: {error}");
-        }
-    }
-    println!("migration: {migration_results:?}");
+        println!("No DATABASE_URL found in .env file, disabling database support");
+        None
+    };
 
     // Restore rooms from the database
     let mut rooms = HashMap::new();
 
     {
-        for room in sqlx::query!("SELECT * FROM rooms").fetch_all(&db).await? {
-            println!(
-                "Restoring room: {} with content: {}",
-                room.room_id, room.content
-            );
-            let room_state = RoomState::new(room.room_id.clone(), &db);
-            room_state.content_tx.send(room.content.clone())?;
-            rooms.insert(room.room_id, room_state);
+        if let Some(ok_db) = &db {
+            for room in sqlx::query!("SELECT * FROM rooms").fetch_all(ok_db).await? {
+                println!(
+                    "Restoring room: {} with content: {}",
+                    room.room_id, room.content
+                );
+                let room_state = RoomState::new(room.room_id.clone(), &db);
+                room_state.content_tx.send(room.content.clone())?;
+                rooms.insert(room.room_id, room_state);
+            }
         }
 
         // If no "general" room is found, create one
@@ -462,14 +472,16 @@ async fn remove_room(
     rooms.remove(&room.0);
 
     // Update database
-    if let Err(e) = sqlx::query!("DELETE FROM rooms WHERE room_id = $1", room.0)
-        .execute(&state.db)
-        .await
-    {
-        eprintln!("Failed to remove room from database: {e:?}");
-        return Err(CustomError {
-            message: "Failed to remove room from database.".to_owned(),
-        });
+    if let Some(db) = &state.db {
+        if let Err(e) = sqlx::query!("DELETE FROM rooms WHERE room_id = $1", room.0)
+            .execute(db)
+            .await
+        {
+            eprintln!("Failed to remove room from database: {e:?}");
+            return Err(CustomError {
+                message: "Failed to remove room from database.".to_owned(),
+            });
+        }
     }
 
     // Notify all users that the room has been removed
