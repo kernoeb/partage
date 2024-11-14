@@ -533,7 +533,7 @@ async fn get_rooms(State(state): State<Arc<AppState>>) -> Json<Vec<Room>> {
 
 #[cfg(not(debug_assertions))]
 const CACHE_EXTENTIONS: [&str; 9] = [
-    "css", "js", "wasm", "png", "jpg", "jpeg", "gif", "webp", "svg",
+    ".css", ".js", ".wasm", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
 ];
 
 /// Static file handler with conditional caching
