@@ -531,7 +531,12 @@ async fn get_rooms(State(state): State<Arc<AppState>>) -> Json<Vec<Room>> {
     Json(room_list)
 }
 
-/// Static file handler
+#[cfg(not(debug_assertions))]
+const CACHE_EXTENTIONS: [&str; 9] = [
+    "css", "js", "wasm", "png", "jpg", "jpeg", "gif", "webp", "svg",
+];
+
+/// Static file handler with conditional caching
 async fn static_handler(uri: Uri) -> impl IntoResponse {
     let path = uri.path().trim_start_matches('/');
 
@@ -542,7 +547,32 @@ async fn static_handler(uri: Uri) -> impl IntoResponse {
     if let Some(content) = Assets::get(path) {
         let mime = mime_guess::from_path(path).first_or_octet_stream();
 
-        ([(header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
+        #[cfg(debug_assertions)]
+        {
+            // Debug build: no caching, original behavior
+            ([(header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
+        }
+
+        #[cfg(not(debug_assertions))]
+        {
+            // Release build: add cache-control header for static assets
+            let cache_header_value = if CACHE_EXTENTIONS.iter().any(|ext| path.ends_with(ext)) {
+                // Cache assets for 1 year
+                "public, max-age=31536000"
+            } else {
+                // No caching for non-static assets or HTML
+                "no-cache, no-store, must-revalidate"
+            };
+
+            (
+                [
+                    (header::CONTENT_TYPE, mime.as_ref()),
+                    (header::CACHE_CONTROL, cache_header_value),
+                ],
+                content.data,
+            )
+                .into_response()
+        }
     } else {
         if path.contains('.') {
             return not_found();

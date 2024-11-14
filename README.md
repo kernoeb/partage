@@ -65,6 +65,51 @@ services:
       - 20000:3001
 ```
 
+### Nginx
+
+```sh
+certbot -d x.example.com --manual --preferred-challenges dns certonly
+```
+
+```nginx
+server {
+  listen 443 ssl http2;
+  listen [::]:443 ssl http2;
+  server_name x.example.com;
+
+  ssl_certificate /etc/letsencrypt/live/x.example.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/x.example.com/privkey.pem;
+
+  ssl_protocols TLSv1.2 TLSv1.3;
+  ssl_prefer_server_ciphers on;
+  ssl_ciphers "EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH";
+
+  gzip on;
+  gzip_disable "msie6";
+
+  gzip_types text/plain text/css application/json application/javascript application/x-javascript text/xml application/xml application/xml+rss text/javascript;
+
+  location / {
+      proxy_pass http://localhost:21000;
+      proxy_http_version 1.1;
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+      proxy_set_header Host $host;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+  }
+}
+
+server {
+  listen 80;
+  server_name x.example.com;
+
+  # Redirect HTTP to HTTPS
+  return 301 https://$host$request_uri;
+}
+```
+
 ### Acknowledgements
 
 - [Axum Websockets example](https://github.com/tokio-rs/axum/blob/main/examples/websockets/src/main.rs)
