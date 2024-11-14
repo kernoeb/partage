@@ -10,8 +10,9 @@ RUN bun run build
 
 ##############################
 FROM lukemathwalker/cargo-chef:latest-rust-alpine AS chef
-RUN apk add --no-cache openssl-dev openssl openssl-libs-static
-RUN cargo install sqlx-cli --no-default-features --features sqlite
+RUN apk add --no-cache openssl-dev openssl openssl-libs-static bash curl
+RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+RUN cargo binstall sqlx-cli
 
 WORKDIR /app
 
