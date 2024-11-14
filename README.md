@@ -47,6 +47,14 @@ docker build -t test-partage .
 docker run --rm --name test-partage -p 20000:3001 test-partage sh
 ```
 
+### Arm/Raspberry Pi
+
+- Install [cross](https://github.com/cross-rs/cross/)
+
+```bash
+CROSS_CONTAINER_OPTS='--platform linux/amd64' cross build --target armv7-unknown-linux-musleabihf --release
+```
+
 For `docker-compose.yml`:
 
 ```yaml
@@ -65,7 +73,7 @@ services:
 
 ### TODO
 
-- [ ] Tests
+- [x] Tests
 - [ ] Documentation
 - [x] Persistence for new channels
 - [x] Feature : no database

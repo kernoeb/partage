@@ -1,7 +1,7 @@
 import type { Room } from '@/bindings/Room'
 import { notify } from '@kyvg/vue3-notification'
 
-const { isFetching, error, data: rooms, execute: fetch } = useFetch('/rooms', { immediate: false })
+const { isFetching, error, data: rooms, execute: fetch } = useFetch('/api/rooms', { immediate: false })
   .json<Room[]>()
 
 const defaultRoom = 'general'
@@ -14,7 +14,7 @@ export function useRooms() {
 
   async function removeRoom(id: string) {
     try {
-      await ofetch(`/rooms/${id}`, { method: 'DELETE' })
+      await ofetch(`/api/rooms/${id}`, { method: 'DELETE' })
     } catch (err) {
       const text = err && typeof err === 'object'
         && 'data' in err && typeof err.data === 'object' && err.data

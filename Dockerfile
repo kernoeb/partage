@@ -34,6 +34,8 @@ COPY --from=build /build/dist ./client/dist
 ENV DATABASE_URL=sqlite:/tmp/ci.db
 RUN sqlx database create
 RUN sqlx migrate run
+
+RUN cargo test
 RUN cargo build --release
 
 ##############################

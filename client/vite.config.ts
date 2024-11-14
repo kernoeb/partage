@@ -92,7 +92,7 @@ export default defineConfig({
   server: {
     port: 13124,
     proxy: {
-      '/rooms': 'http://0.0.0.0:3001',
+      '/api/rooms': 'http://0.0.0.0:3001',
       '/ws': {
         target: 'ws://0.0.0.0:3001',
         ws: true,

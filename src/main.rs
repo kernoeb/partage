@@ -92,6 +92,15 @@ struct AppState {
     db: Option<SqlitePool>,
 }
 
+fn app(app_state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/ws", get(handler))
+        .route("/api/rooms", get(get_rooms))
+        .route("/api/rooms/:id", delete(remove_room))
+        .with_state(app_state)
+        .fallback(static_handler)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     if dotenv().is_err() {
@@ -168,12 +177,7 @@ async fn main() -> Result<()> {
         db,
     });
 
-    let app = Router::new()
-        .route("/ws", get(handler))
-        .route("/rooms", get(get_rooms))
-        .route("/rooms/:id", delete(remove_room))
-        .with_state(app_state)
-        .fallback(static_handler);
+    let app = app(app_state);
 
     let listener = tokio::net::TcpListener::bind(addr.to_string()).await?;
 
@@ -503,7 +507,7 @@ async fn remove_room(
 }
 
 /// Room
-#[derive(TS, serde::Serialize)]
+#[derive(TS, Serialize, Deserialize)]
 #[ts(export)]
 struct Room {
     id: String,
@@ -582,5 +586,621 @@ async fn shutdown_signal() {
     tokio::select! {
         () = ctrl_c => {},
         () = terminate => {},
+    }
+}
+
+// Test functions
+#[cfg(test)]
+mod tests {
+    use axum::Router;
+    use futures::{SinkExt, StreamExt};
+    use serde_json::json;
+    use std::net::SocketAddr;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::connect_async;
+
+    use crate::{app, get_rooms, handler, remove_room, AppState, Room, RoomState};
+    use axum::routing::{delete, get};
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::Mutex;
+    use tokio_tungstenite::tungstenite::Message;
+
+    async fn setup_test_server() -> (SocketAddr, Router) {
+        let addr = SocketAddr::from(([127, 0, 0, 1], 0));
+        let listener = TcpListener::bind(addr).await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        // Create test app state similar to main()
+        let app_state = Arc::new(AppState {
+            rooms: Mutex::new({
+                let mut rooms = HashMap::<String, RoomState>::new();
+                rooms.insert(
+                    "general".to_string(),
+                    RoomState::new("general".to_string(), &None),
+                );
+                rooms
+            }),
+            db: None, // Using in-memory state for tests
+        });
+
+        let app = app(app_state);
+
+        let app_clone = app.clone();
+        tokio::spawn(async move {
+            axum::serve(listener, app_clone).await.unwrap();
+        });
+
+        (server_addr, app)
+    }
+
+    #[tokio::test]
+    async fn test_static_file_handling() {
+        let (addr, _) = setup_test_server().await;
+        let client = reqwest::Client::new();
+
+        // Test root path
+        let response = client.get(format!("http://{addr}/")).send().await.unwrap();
+        assert_eq!(response.status(), 200);
+
+        // Test index.html
+        let response = client
+            .get(format!("http://{addr}/index.html"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+
+        // Test favicon.ico
+        let response = client
+            .get(format!("http://{addr}/favicon.ico"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+
+        // Test non-existent file
+        let response = client
+            .get(format!("http://{addr}/nonexistent.js"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 404);
+    }
+
+    #[tokio::test]
+    async fn test_websocket_chat_flow() {
+        let (addr, _app) = setup_test_server().await;
+
+        // Connect two test users
+        let ws_uri = format!("ws://{addr}/ws");
+        let (mut ws1, _) = connect_async(&ws_uri).await.unwrap();
+        let (mut ws2, _) = connect_async(&ws_uri).await.unwrap();
+
+        // User 1 joins general channel
+        let join_msg1 = json!({
+            "type": "join",
+            "channel": "general",
+            "username": "alice"
+        })
+        .to_string();
+        ws1.send(Message::Text(join_msg1)).await.unwrap();
+
+        // User 2 joins general channel
+        let join_msg2 = json!({
+            "type": "join",
+            "channel": "general",
+            "username": "bob"
+        })
+        .to_string();
+        ws2.send(Message::Text(join_msg2)).await.unwrap();
+
+        // Wait for initial messages on both connections
+        for _ in 0..2 {
+            if let Some(msg) = ws1.next().await {
+                let _ = msg.unwrap().into_text().unwrap();
+            }
+        }
+        for _ in 0..2 {
+            if let Some(msg) = ws2.next().await {
+                let _ = msg.unwrap().into_text().unwrap();
+            }
+        }
+
+        // Small delay to ensure all messages are processed
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // User 1 sends a message
+        let chat_msg = json!({
+            "type": "message",
+            "channel": "general",
+            "username": "alice",
+            "content": "Hello, Bob!"
+        })
+        .to_string();
+        ws1.send(Message::Text(chat_msg)).await.unwrap();
+
+        // Verify Bob receives Alice's message
+        if let Some(msg) = ws2.next().await {
+            let received = msg.unwrap().into_text().unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(&received).unwrap();
+            let inner_msg: serde_json::Value =
+                serde_json::from_str(parsed["value"].as_str().unwrap()).unwrap();
+            assert_eq!(inner_msg["username"].as_str().unwrap(), "alice");
+            assert_eq!(inner_msg["content"].as_str().unwrap(), "Hello, Bob!");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_connection_edge_cases() {
+        let (addr, _) = setup_test_server().await;
+        let ws_uri = format!("ws://{addr}/ws");
+
+        // Test connection with missing username
+        let (mut ws, _) = connect_async(&ws_uri).await.unwrap();
+        let invalid_join = json!({
+            "channel": "test"
+        })
+        .to_string();
+
+        ws.send(Message::Text(invalid_join)).await.unwrap();
+
+        if let Some(msg) = ws.next().await {
+            let error_msg = msg.unwrap().into_text().unwrap();
+            assert!(error_msg.contains("error"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_room_management() {
+        let (addr, _) = setup_test_server().await;
+        let client = reqwest::Client::new();
+        let base_url = format!("http://{addr}");
+
+        // Get initial rooms (should include general)
+        let response = client
+            .get(format!("{base_url}/api/rooms"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let rooms: Vec<Room> = response.json().await.unwrap();
+        assert!(rooms.iter().any(|r| r.id == "general"));
+
+        // Try to delete general room (should fail)
+        let response = client
+            .delete(format!("{base_url}/api/rooms/general"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 400);
+
+        // Connect user to a new room
+        let ws_uri = format!("ws://{addr}/ws");
+        let (mut ws1, _) = connect_async(&ws_uri).await.unwrap();
+
+        let join_msg = json!({
+            "username": "carol",
+            "channel": "new-room"
+        })
+        .to_string();
+        ws1.send(Message::Text(join_msg)).await.unwrap();
+
+        // Verify new room exists
+        let response = client
+            .get(format!("{base_url}/api/rooms"))
+            .send()
+            .await
+            .unwrap();
+        let rooms: Vec<Room> = response.json().await.unwrap();
+        assert!(rooms.iter().any(|r| r.id == "new-room"));
+    }
+
+    #[tokio::test]
+    async fn test_room_removal_edge_cases() {
+        let (addr, _) = setup_test_server().await;
+        let client = reqwest::Client::new();
+
+        // Test removing non-existent room
+        let response = client
+            .delete(format!("http://{addr}/api/rooms/nonexistent"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+
+        // Test removing room with active users
+        // First create and populate a room
+        let ws_uri = format!("ws://{addr}/ws");
+        let (mut ws1, _) = connect_async(&ws_uri).await.unwrap();
+        let (mut ws2, _) = connect_async(&ws_uri).await.unwrap();
+
+        // Join two users to the same room
+        let join_msg = json!({
+            "username": "test_user_1",
+            "channel": "test_room"
+        })
+        .to_string();
+        ws1.send(Message::Text(join_msg)).await.unwrap();
+
+        let join_msg = json!({
+            "username": "test_user_2",
+            "channel": "test_room"
+        })
+        .to_string();
+        ws2.send(Message::Text(join_msg)).await.unwrap();
+
+        // Try to remove the room with active users
+        let response = client
+            .delete(format!("http://{addr}/api/rooms/test_room"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 400);
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_chat() {
+        let (addr, _) = setup_test_server().await;
+        let mut connections = HashMap::new();
+
+        // Connect multiple users
+        let ws_uri = format!("ws://{addr}/ws");
+        for i in 0..5 {
+            let (ws, _) = connect_async(&ws_uri).await.unwrap();
+            connections.insert(format!("user{i}"), ws);
+        }
+
+        // Join all users to the same room
+        for (username, ref mut ws) in &mut connections {
+            let join_msg = json!({
+                "type": "join",
+                "channel": "test_room",
+                "username": username,
+            })
+            .to_string();
+            ws.send(Message::Text(join_msg)).await.unwrap();
+        }
+
+        // Have each user send a message
+        for (username, ref mut ws) in &mut connections {
+            let msg = json!({
+                "type": "message",
+                "channel": "test_room",
+                "username": username,
+                "content": format!("Hello from {}", username),
+            })
+            .to_string();
+            ws.send(Message::Text(msg)).await.unwrap();
+        }
+
+        // Verify each user receives messages from others
+        for ref mut ws in connections.values_mut() {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            if let Some(msg) = ws.next().await {
+                let msg = msg.unwrap();
+                assert!(msg.is_text());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_reconnection_scenario() {
+        let (addr, _) = setup_test_server().await;
+        let ws_uri = format!("ws://{addr}/ws");
+
+        // Initial connection
+        let (mut ws1, _) = connect_async(&ws_uri).await.unwrap();
+
+        // Join and send a message
+        let join_msg = json!({
+            "username": "disconnector",
+            "channel": "test-room"
+        })
+        .to_string();
+        ws1.send(Message::Text(join_msg)).await.unwrap();
+
+        let msg = json!({
+            "type": "message",
+            "value": "Initial message",
+            "username": "disconnector"
+        })
+        .to_string();
+        ws1.send(Message::Text(msg)).await.unwrap();
+
+        // Simulate disconnection
+        drop(ws1);
+
+        // Reconnect
+        let (mut ws2, _) = connect_async(&ws_uri).await.unwrap();
+
+        // Rejoin same room
+        let rejoin_msg = json!({
+            "username": "disconnector",
+            "channel": "test-room"
+        })
+        .to_string();
+        ws2.send(Message::Text(rejoin_msg)).await.unwrap();
+
+        // Verify we receive the current room state
+        if let Some(msg) = ws2.next().await {
+            let received = msg.unwrap().into_text().unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(&received).unwrap();
+            assert_eq!(parsed["type"], "message");
+            assert_eq!(parsed["username"], "Server");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_error_handling() {
+        let (addr, _) = setup_test_server().await;
+        let ws_uri = format!("ws://{addr}/ws");
+        let (mut ws, _) = connect_async(&ws_uri).await.unwrap();
+
+        // Send invalid JSON
+        ws.send(Message::Text("invalid json".to_string()))
+            .await
+            .unwrap();
+
+        // Should receive error message
+        if let Some(msg) = ws.next().await {
+            let msg = msg.unwrap();
+            assert!(msg.is_text());
+        }
+
+        // Try to delete non-existent room
+        let client = reqwest::Client::new();
+        let response = client
+            .delete(format!("http://{addr}/api/rooms/nonexistent"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200); // Silently fails as specified
+    }
+
+    // Keep existing imports and add:
+    use sqlx::SqlitePool;
+
+    async fn setup_test_server_with_db() -> (SocketAddr, Router, SqlitePool) {
+        let addr = SocketAddr::from(([127, 0, 0, 1], 0));
+        let listener = TcpListener::bind(addr).await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        // Create in-memory SQLite database
+        let db = SqlitePool::connect("sqlite::memory:").await.unwrap();
+
+        // Run migrations
+        sqlx::migrate!().run(&db).await.unwrap();
+
+        // Initialize the general room in the database first
+        sqlx::query!(
+            "INSERT INTO rooms (room_id, content) VALUES (?, ?)",
+            "general",
+            ""
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let app_state = Arc::new(AppState {
+            rooms: Mutex::new({
+                let mut rooms = HashMap::<String, RoomState>::new();
+                rooms.insert(
+                    "general".to_string(),
+                    RoomState::new("general".to_string(), &Some(db.clone())),
+                );
+                rooms
+            }),
+            db: Some(db.clone()),
+        });
+
+        let app = Router::new()
+            .route("/ws", get(handler))
+            .route("/api/rooms", get(get_rooms))
+            .route("/api/rooms/:id", delete(remove_room))
+            .with_state(app_state);
+
+        let app_clone = app.clone();
+        tokio::spawn(async move {
+            axum::serve(listener, app_clone).await.unwrap();
+        });
+
+        (server_addr, app, db)
+    }
+
+    #[tokio::test]
+    async fn test_database_persistence() {
+        let (addr, _, db) = setup_test_server_with_db().await;
+        let ws_uri = format!("ws://{addr}/ws");
+
+        // Connect and send messages
+        let (mut ws1, _) = connect_async(&ws_uri).await.unwrap();
+
+        // Join general room
+        let join_msg = json!({
+            "username": "db_test_user",
+            "channel": "general"
+        })
+        .to_string();
+        ws1.send(Message::Text(join_msg)).await.unwrap();
+
+        // Wait for initial messages
+        let msg = ws1.next().await.unwrap();
+        let _ = msg.unwrap().into_text().unwrap();
+
+        // Send a test message
+        let test_content = "Test message for database persistence";
+        ws1.send(Message::Text(test_content.to_string()))
+            .await
+            .unwrap();
+
+        // Wait a bit for the database update interval
+        tokio::time::sleep(Duration::from_secs(6)).await;
+
+        // Verify content was saved to database
+        let room = sqlx::query!("SELECT * FROM rooms WHERE room_id = ?", "general")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+
+        assert_eq!(room.content, test_content);
+    }
+
+    #[tokio::test]
+    async fn test_room_persistence() {
+        let (addr, _, db) = setup_test_server_with_db().await;
+        let ws_uri = format!("ws://{addr}/ws");
+
+        // Create a new room by connecting to it
+        let (mut ws1, _) = connect_async(&ws_uri).await.unwrap();
+        let new_room = "persistent_test_room";
+
+        let join_msg = json!({
+            "username": "room_creator",
+            "channel": new_room
+        })
+        .to_string();
+        ws1.send(Message::Text(join_msg)).await.unwrap();
+
+        // Send content to the new room
+        let test_content = "Content for persistent room";
+
+        // Wait for initial messages
+        let msg = ws1.next().await.unwrap();
+        let _ = msg.unwrap().into_text().unwrap();
+
+        ws1.send(Message::Text(test_content.to_string()))
+            .await
+            .unwrap();
+
+        // Wait for database update
+        tokio::time::sleep(Duration::from_secs(6)).await;
+
+        // Verify room exists in database
+        let room = sqlx::query!("SELECT * FROM rooms WHERE room_id = ?", new_room)
+            .fetch_one(&db)
+            .await
+            .unwrap();
+
+        assert_eq!(room.content, test_content);
+
+        // Test room deletion
+        let client = reqwest::Client::new();
+        let response = client
+            .delete(format!("http://{addr}/api/rooms/{new_room}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+
+        // Verify room was deleted from database
+        let result = sqlx::query!("SELECT * FROM rooms WHERE room_id = ?", new_room)
+            .fetch_optional(&db)
+            .await
+            .unwrap();
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_multiple_room_persistence() {
+        let (addr, _, db) = setup_test_server_with_db().await;
+        let ws_uri = format!("ws://{addr}/ws");
+
+        // Create multiple rooms and send messages
+        let room_data = vec![
+            ("room1", "content1"),
+            ("room2", "content2"),
+            ("room3", "content3"),
+        ];
+
+        for (room_name, content) in &room_data {
+            let (mut ws, _) = connect_async(&ws_uri).await.unwrap();
+
+            let join_msg = json!({
+                "username": "multi_room_test",
+                "channel": room_name
+            })
+            .to_string();
+            ws.send(Message::Text(join_msg)).await.unwrap();
+
+            // Wait for initial messages
+            let msg = ws.next().await.unwrap();
+            let _ = msg.unwrap().into_text().unwrap();
+
+            ws.send(Message::Text((*content).to_string()))
+                .await
+                .unwrap();
+
+            // Wait for database update and close connection
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            drop(ws);
+
+            // Wait a bit before creating next room
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+
+        // Wait for all database updates to complete
+        tokio::time::sleep(Duration::from_secs(4)).await;
+
+        // Verify all rooms are in database with correct content
+        for (room_name, expected_content) in &room_data {
+            let room = sqlx::query!("SELECT * FROM rooms WHERE room_id = ?", room_name)
+                .fetch_one(&db)
+                .await
+                .unwrap();
+
+            assert_eq!(room.content, *expected_content);
+        }
+
+        // Verify total room count
+        let count = sqlx::query!("SELECT COUNT(*) as count FROM rooms")
+            .fetch_one(&db)
+            .await
+            .unwrap()
+            .count;
+
+        // Count should be room_data.len() + 1 (including general room)
+        let count_usize = usize::try_from(count).expect("Failed to convert count to usize");
+        assert_eq!(count_usize, room_data.len() + 1);
+    }
+
+    #[tokio::test]
+    async fn test_content_update() {
+        let (addr, _, db) = setup_test_server_with_db().await;
+        let ws_uri = format!("ws://{addr}/ws");
+
+        let (mut ws1, _) = connect_async(&ws_uri).await.unwrap();
+
+        // Join test room
+        let room_name = "update_test_room";
+        let join_msg = json!({
+            "username": "content_updater",
+            "channel": room_name
+        })
+        .to_string();
+        ws1.send(Message::Text(join_msg)).await.unwrap();
+
+        // Wait for initial messages
+        let msg = ws1.next().await.unwrap();
+        let _ = msg.unwrap().into_text().unwrap();
+
+        // Send multiple messages and verify database updates
+        let messages = vec!["First message", "Second message", "Third message"];
+
+        for message in &messages {
+            ws1.send(Message::Text((*message).to_string()))
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_secs(6)).await;
+
+            let room = sqlx::query!("SELECT * FROM rooms WHERE room_id = ?", room_name)
+                .fetch_one(&db)
+                .await
+                .unwrap();
+
+            assert_eq!(room.content, *message);
+        }
     }
 }
