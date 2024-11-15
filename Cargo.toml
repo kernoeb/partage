@@ -38,6 +38,7 @@ reqwest = { version = "0", features = ["json"] }
 strip = true
 lto = true
 codegen-units = 1
+panic = "abort"
 
 [profile.dev.package.sqlx-macros]
 opt-level = 3

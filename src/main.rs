@@ -124,7 +124,10 @@ async fn main() -> Result<()> {
             println!("Creating database {db_url}");
             match Sqlite::create_database(db_url).await {
                 Ok(()) => println!("Create db success"),
-                Err(error) => panic!("error: {error}"),
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    std::process::exit(1);
+                }
             }
         }
 
@@ -135,7 +138,8 @@ async fn main() -> Result<()> {
         match migration_results {
             Ok(()) => println!("Migration success"),
             Err(error) => {
-                panic!("error: {error}");
+                eprintln!("error: {error}");
+                std::process::exit(1);
             }
         }
         println!("migration: {migration_results:?}");
