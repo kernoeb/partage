@@ -43,14 +43,22 @@ bun run dev
 
 Open [http://localhost:13124](http://localhost:13124) in your browser.
 
-### Docker
+### Build
+
+### Linux, MacOS
 
 ```bash
-docker build -t test-partage .
-docker run --rm --name test-partage -p 20000:3001 test-partage sh
+cd client
+bun run build
+cd ..
+cargo build --release
 ```
 
-### Arm/Raspberry Pi
+> By default, Rust will build for the host architecture. To build for another architecture, use the `--target` flag.
+> 
+> :warning: Rust leak your username and your current directory in the binary. To avoid this, look at the [Arm/Raspberry Pi](#armraspberry-pi) section, or the [Dockerfile](Dockerfile).
+
+#### Arm/Raspberry Pi
 
 - Install [cross](https://github.com/cross-rs/cross/)
 
@@ -60,6 +68,13 @@ CROSS_CONTAINER_OPTS="--platform linux/amd64 -e RUSTFLAGS='-Zlocation-detail=non
 -Z build-std-features=panic_immediate_abort \
 --target armv7-unknown-linux-musleabihf \
 --release
+```
+
+#### Docker
+
+```bash
+docker build -t test-partage .
+docker run --rm --name test-partage -p 20000:3001 test-partage sh
 ```
 
 For `docker-compose.yml`:
@@ -72,7 +87,9 @@ services:
       - 20000:3001
 ```
 
-### Nginx
+### Deployment
+
+#### Nginx
 
 ```sh
 certbot -d x.example.com --manual --preferred-challenges dns certonly
