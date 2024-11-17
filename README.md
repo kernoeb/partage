@@ -45,7 +45,7 @@ Open [http://localhost:13124](http://localhost:13124) in your browser.
 
 ### Build
 
-### Linux, MacOS
+#### Linux, MacOS
 
 ```bash
 cd client
