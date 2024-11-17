@@ -1,5 +1,7 @@
 # Partage
 
+![Workflow](https://github.com/kernoeb/partage/actions/workflows/docker-publish.yml/badge.svg)
+
 ![capture partage](resources/partage.png)
 
 ### Prerequisites
@@ -7,6 +9,7 @@
 - [Bun](https://bun.sh/)
 - [Rust](https://www.rust-lang.org/tools/install)
 - [Bacon](https://dystroy.org/bacon/)
+- [Sqlx CLI](https://github.com/launchbadge/sqlx/blob/main/sqlx-cli/README.md)
 
 ### Development
 
@@ -52,7 +55,11 @@ docker run --rm --name test-partage -p 20000:3001 test-partage sh
 - Install [cross](https://github.com/cross-rs/cross/)
 
 ```bash
-CROSS_CONTAINER_OPTS='--platform linux/amd64' cross build --target armv7-unknown-linux-musleabihf --release
+CROSS_CONTAINER_OPTS="--platform linux/amd64 -e RUSTFLAGS='-Zlocation-detail=none -Zfmt-debug=shallow'" cross +nightly build \
+-Z build-std=std,panic_abort \
+-Z build-std-features=panic_immediate_abort \
+--target armv7-unknown-linux-musleabihf \
+--release
 ```
 
 For `docker-compose.yml`:
