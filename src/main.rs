@@ -93,10 +93,15 @@ struct AppState {
 }
 
 fn app(app_state: Arc<AppState>) -> Router {
+    let rooms = Router::new()
+        .route("/", get(get_rooms))
+        .route("/:room_id", delete(remove_room));
+
+    let api = Router::new().nest("/rooms", rooms);
+
     Router::new()
         .route("/ws", get(handler))
-        .route("/api/rooms", get(get_rooms))
-        .route("/api/rooms/:id", delete(remove_room))
+        .nest("/api", api)
         .with_state(app_state)
         .fallback(static_handler)
 }
