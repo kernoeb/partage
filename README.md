@@ -55,7 +55,7 @@ cargo build --release
 ```
 
 > By default, Rust will build for the host architecture. To build for another architecture, use the `--target` flag.
-> 
+>
 > :warning: Rust leak your username and your current directory in the binary. To avoid this, look at the [Arm/Raspberry Pi](#armraspberry-pi) section, or the [Dockerfile](Dockerfile).
 
 #### Arm/Raspberry Pi
@@ -68,6 +68,31 @@ CROSS_CONTAINER_OPTS="--platform linux/amd64 -e RUSTFLAGS='-Zlocation-detail=non
 -Z build-std-features=panic_immediate_abort \
 --target armv7-unknown-linux-musleabihf \
 --release
+```
+
+#### Service
+
+```ini
+[Unit]
+Description=Partage Service
+After=network.target
+
+[Service]
+ExecStart=/path/to/dir/partage
+Restart=always
+User=root
+WorkingDirectory=/path/to/dir
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable partage.service
+sudo systemctl start partage.service
+sudo systemctl status partage.service
 ```
 
 #### Docker
