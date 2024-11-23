@@ -47,11 +47,7 @@ const { status, data, send, open } = useWebSocket('/ws', {
   },
   immediate: false,
   onMessage: (_, { data: msg }) => {
-    if (msg) {
-      if (msg === 'pong') {
-        return
-      }
-
+    if (msg && typeof msg === 'string') {
       try {
         const { type, username: msgUsername, value } = JSON.parse(msg) as SocketMessage
         if (type === 'error') {
