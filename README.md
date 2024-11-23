@@ -80,7 +80,6 @@ After=network.target
 [Service]
 ExecStart=/path/to/dir/partage
 Restart=always
-User=root
 WorkingDirectory=/path/to/dir
 RestartSec=5
 
