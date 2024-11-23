@@ -24,12 +24,12 @@ WORKDIR /app
 FROM chef AS planner
 COPY ./Cargo.toml ./Cargo.lock ./
 COPY ./src ./src
-RUN cargo chef prepare --recipe-path recipe.json
+RUN cargo +nightly chef prepare --recipe-path recipe.json
 
 ##############################
 FROM chef AS builder
 COPY --from=planner /app/recipe.json .
-RUN cargo chef cook --release
+RUN cargo +nightly chef cook --release
 COPY ./Cargo.toml ./Cargo.lock ./
 COPY ./src ./src
 COPY ./migrations ./migrations
@@ -39,7 +39,7 @@ ENV DATABASE_URL=sqlite:/tmp/ci.db
 RUN sqlx database create
 RUN sqlx migrate run
 
-RUN cargo test
+RUN cargo +nightly test
 
 # https://github.com/johnthagen/min-sized-rust
 # Also avoid to leak the path of the source code
