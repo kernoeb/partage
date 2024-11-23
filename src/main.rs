@@ -16,6 +16,7 @@ use axum::{
     Json, Router,
 };
 use dotenvy::dotenv;
+use futures::stream::SplitSink;
 use futures::{SinkExt, StreamExt};
 use optional_default::OptionalDefault;
 use rust_embed::Embed;
@@ -207,6 +208,13 @@ async fn handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> im
     ws.on_upgrade(|socket| handle_socket(socket, state))
 }
 
+/// Send a pong frame in response to a ping frame
+async fn send_pong_frame(sender: &Arc<Mutex<SplitSink<WebSocket, Message>>>, b: Vec<u8>) {
+    if b[0] == 0x9 {
+        let _ = sender.lock().await.send(Message::Binary(vec![0xA])).await;
+    }
+}
+
 /// Update the room content
 async fn update_room_content(db: &SqlitePool, room_id: String, new_content: String) -> Result<()> {
     println!("Updating room content : {new_content}");
@@ -254,28 +262,36 @@ struct SocketMessage {
 
 /// Handle sending and receiving messages
 async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
-    let (mut sender, mut receiver) = socket.split();
+    let (sender, mut receiver) = socket.split();
+    let sender = Arc::new(Mutex::new(sender)); // Wrap the sender in an Arc<Mutex<>>
+    let sender_recv_task = sender.clone(); // Clone the Arc for the recv_messages task
+
     let mut username = String::new();
     let mut channel = String::new();
     let content;
     let mut tx = None::<broadcast::Sender<String>>;
 
     while let Some(Ok(msg)) = receiver.next().await {
-        if let Message::Text(name) = msg {
+        if let Message::Binary(msg) = msg {
+            send_pong_frame(&sender, msg).await;
+            continue;
+        } else if let Message::Text(text) = msg {
             #[derive(Deserialize)]
             struct Connect {
                 username: String,
                 channel: String,
             }
 
-            println!("Name: {name}");
+            println!("Name: {text}");
 
-            let connect: Connect = match serde_json::from_str(&name) {
+            let connect: Connect = match serde_json::from_str(&text) {
                 Ok(connect) => connect,
                 Err(err) => {
-                    println!("{}", &name);
+                    println!("{}", &text);
                     eprintln!("{err}");
-                    let _ = sender
+                    let _ = sender_recv_task
+                        .lock()
+                        .await
                         .send(Message::Text(
                             json!(SocketMessage! {
                                 message_type: SocketMessageType::Error,
@@ -325,7 +341,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                 }
 
                 // Send the user the current room content
-                let _ = sender
+                let _ = sender_recv_task
+                    .lock()
+                    .await
                     .send(Message::Text(
                         json!(SocketMessage {
                             message_type: SocketMessageType::Message,
@@ -339,7 +357,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
                 break;
             }
             println!("Failed to connect to room!");
-            let _ = sender
+            let _ = sender_recv_task
+                .lock()
+                .await
                 .send(Message::Text(
                     json!(SocketMessage! {
                         message_type: SocketMessageType::Error,
@@ -372,7 +392,13 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     let mut recv_messages = tokio::spawn(async move {
         while let Ok(msg) = rx.recv().await {
             println!("Received: {msg}");
-            if sender.send(Message::Text(msg)).await.is_err() {
+            if sender_recv_task
+                .lock()
+                .await
+                .send(Message::Text(msg))
+                .await
+                .is_err()
+            {
                 break;
             }
         }
@@ -384,27 +410,32 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         let channel = channel.clone();
         let state = state.clone();
         tokio::spawn(async move {
-            while let Some(Ok(Message::Text(text))) = receiver.next().await {
-                println!("{name}: {text}");
+            while let Some(Ok(msg)) = receiver.next().await {
+                if let Message::Binary(b) = msg {
+                    send_pong_frame(&sender, b).await;
+                    continue;
+                } else if let Message::Text(text) = msg {
+                    println!("{name}: {text}");
 
-                // Update the room content
-                let rooms = state.rooms.lock().await;
-                if let Some(room) = rooms.get(&channel) {
-                    // ignore errors but log them
-                    room.content_tx
-                        .send(text.clone())
-                        .unwrap_or_else(|err| eprintln!("Failed to send message to room: {err}"));
+                    // Update the room content
+                    let rooms = state.rooms.lock().await;
+                    if let Some(room) = rooms.get(&channel) {
+                        // ignore errors but log them
+                        room.content_tx.send(text.clone()).unwrap_or_else(|err| {
+                            eprintln!("Failed to send message to room: {err}")
+                        });
+                    }
+                    drop(rooms);
+
+                    let _ = tx.send(
+                        json!(SocketMessage {
+                            message_type: SocketMessageType::Message,
+                            value: Some(text),
+                            username: name.clone(),
+                        })
+                        .to_string(),
+                    );
                 }
-                drop(rooms);
-
-                let _ = tx.send(
-                    json!(SocketMessage {
-                        message_type: SocketMessageType::Message,
-                        value: Some(text),
-                        username: name.clone(),
-                    })
-                    .to_string(),
-                );
             }
         })
     };

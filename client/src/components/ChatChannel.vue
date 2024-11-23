@@ -35,9 +35,16 @@ const currentRoomUsersWithMeFirst = computed(() => {
 const editor = useTemplateRef<VTextarea | null>('editor')
 const content = ref<string | null>(null)
 
+const pingFrame = new Uint8Array([0x9]) // Ping frame
+const pongFrame = new Uint8Array([0xA]) // Pong frame
+
 const { status, data, send, open } = useWebSocket('/ws', {
   autoReconnect: true,
-  heartbeat: false,
+  heartbeat: {
+    interval: 5000,
+    message: pingFrame.buffer,
+    responseMessage: pongFrame.buffer,
+  },
   immediate: false,
   onMessage: (_, { data: msg }) => {
     if (msg) {
